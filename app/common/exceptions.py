@@ -19,6 +19,10 @@ class ForbiddenException(BusinessException):
     def __init__(self, message: str = '无权限访问'):
         super().__init__(403, message)
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(BusinessException)
     async def business_exception_handler(_request: Request, exc: BusinessException) -> JSONResponse:
@@ -28,5 +32,17 @@ def register_exception_handlers(app: FastAPI) -> None:
                 'code': exc.code,
                 'data': None,
                 'message': exc.message
+            }
+        )
+
+    @app.exception_handler(Exception)
+    async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+        logger.error(f"Unexpected error: {exc}", exc_info=True)
+        return JSONResponse(
+            status_code=500,
+            content={
+                'code': 500,
+                'data': None,
+                'message': '服务器内部错误'
             }
         )
