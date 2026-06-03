@@ -1,9 +1,12 @@
+from langchain_core.messages import SystemMessage, HumanMessage
+from langchain_openai import ChatOpenAI
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.common.config import settings
 from app.common.exceptions import NotFoundException, ForbiddenException
 from app.conversation.models import Conversation
 from app.conversation.repository import create_conversation, list_active_conversation_by_user, get_conversation_by_id, \
-    soft_delete_conversation
+    soft_delete_conversation, update_title
 from app.conversation.schemas import ConversationCreate, ConversationResponse
 
 
@@ -34,3 +37,25 @@ async def delete_conversation(db: AsyncSession, conversation_id: str, user_id: s
     if str(conversation.user_id) != str(user_id):
         raise ForbiddenException(message="无权删除该会话")
     await soft_delete_conversation(db, conversation)
+
+async def generate_and_update_title(db: AsyncSession, conversation_id: str, first_message: str):
+    try:
+        title_llm = ChatOpenAI(
+            model = settings.DEEPSEEK_MODEL,
+            api_key=settings.DEEPSEEK_API_KEY,
+            base_url=settings.DEEPSEEK_BASE_URL,
+            streaming=False,
+            max_tokens=30
+        )
+        response = await title_llm.ainvoke([
+            SystemMessage(content='你是一个标题生产助手，根据以下用户消息，生成一个简短4-8个字的对话标题，只输出标题文本，不要加引号和标点'),
+            HumanMessage(content=first_message)
+        ])
+        title = response.content.strip()
+        if title:
+            await update_title(db, conversation_id, title)
+            await db.commit()
+            return title
+    except Exception as e:
+        await db.rollback()
+    return None

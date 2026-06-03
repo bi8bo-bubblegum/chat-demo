@@ -6,9 +6,10 @@ from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.chat.graph import build_graph
-from app.chat.schemas import TokenEvent, DoneEvent, ErrorEvent
+from app.chat.schemas import TokenEvent, DoneEvent, ErrorEvent, TitleUpdateEvent
 from app.conversation import service as conversation_service
 from app.message import service as message_service
+from app.message.repository import count_message_by_conversation
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +25,10 @@ async def chat_stream(
         await conversation_service.get_conversation(db, user_id, conversation_id)
         await message_service.save_message(db, conversation_id, 'user', message)
         await db.commit()
+
+        # 判断是否首条消息（此时只有刚保存的 user 消息，assistant 还未生成）
+        is_first_message = await count_message_by_conversation(db, conversation_id) <= 1
+
         graph = build_graph(checkpointer)
         config = {'configurable': {'thread_id': conversation_id}}
         input_state = {
@@ -44,6 +49,14 @@ async def chat_stream(
 
         await message_service.save_message(db, conversation_id, 'assistant', full_response)
         await db.commit()
+
+        # 首条消息时异步生成标题
+        if is_first_message:
+            title = await conversation_service.generate_and_update_title(db, conversation_id, message)
+            if title:
+                title_event = TitleUpdateEvent(conversation_id=conversation_id, title=title)
+                yield f'data: {title_event.model_dump_json()}\n\n'
+
         done_event = DoneEvent(conversation_id=conversation_id)
         yield f'data: {done_event.model_dump_json()}\n\n'
     except Exception as e:

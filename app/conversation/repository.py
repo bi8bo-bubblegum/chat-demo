@@ -29,3 +29,13 @@ async def get_conversation_by_id(db: AsyncSession, conversation_id: str) -> Conv
 async def soft_delete_conversation(db: AsyncSession, conversation: Conversation) -> None:
     conversation.is_active = False
     await db.flush()
+
+async def update_title(db: AsyncSession, conversation_id: str, title: str):
+    sql = (select(Conversation)
+           .where(Conversation.id == conversation_id)
+           )
+    result = await db.execute(sql)
+    conversation = result.scalar_one_or_none()
+    if conversation:
+        conversation.title = title
+        await db.flush()

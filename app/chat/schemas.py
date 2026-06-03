@@ -15,3 +15,8 @@ class DoneEvent(BaseModel):
 class ErrorEvent(BaseModel):
     type: str = 'error'
     message: str
+
+class TitleUpdateEvent(BaseModel):
+    type: str = 'title_update'
+    conversation_id: str
+    title: str
