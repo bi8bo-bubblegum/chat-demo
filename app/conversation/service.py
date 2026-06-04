@@ -10,6 +10,10 @@ from app.conversation.repository import create_conversation, list_active_convers
 from app.conversation.schemas import ConversationCreate, ConversationResponse
 
 
+from app.conversation import repository as conv_repo
+from app.knowledge_base.schemas import KnowledgeBaseResponse
+
+
 async def create_new_conversation(db: AsyncSession, user_id: str, conversation_create: ConversationCreate) -> ConversationResponse:
     conversation = Conversation(
         title=conversation_create.title or '新对话',
@@ -59,3 +63,26 @@ async def generate_and_update_title(db: AsyncSession, conversation_id: str, firs
     except Exception as e:
         await db.rollback()
     return None
+
+
+
+async def add_knowledge_bases_to_conversation(db: AsyncSession, user_id: str, conversation_id: str, kb_ids: list[str]) -> None:
+    # 校验对话归属
+    await get_conversation(db, user_id, conversation_id)
+    await conv_repo.add_knowledge_bases_to_conversation(db, conversation_id, kb_ids)
+
+
+async def remove_knowledge_base_from_conversation(db: AsyncSession, user_id: str, conversation_id: str, kb_id: str) -> None:
+    await get_conversation(db, user_id, conversation_id)
+    await conv_repo.remove_knowledge_base_from_conversation(db, conversation_id, kb_id)
+
+
+async def list_conversation_knowledge_bases(db: AsyncSession, user_id: str, conversation_id: str) -> list[KnowledgeBaseResponse]:
+    await get_conversation(db, user_id, conversation_id)
+    kb_list = await conv_repo.list_knowledge_bases_by_conversation(db, conversation_id)
+    return [KnowledgeBaseResponse.model_validate(kb) for kb in kb_list]
+
+
+async def get_conversation_kb_ids(db: AsyncSession, conversation_id: str) -> list[str]:
+    """获取对话关联的知识库ID列表（供 chat service 调用）"""
+    return await conv_repo.get_conversation_kb_ids(db, conversation_id)
