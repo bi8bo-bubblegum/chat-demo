@@ -8,7 +8,7 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.config import settings
-from app.common.cos_client import upload_file, download_file, delete_file, get_presigned_url
+from app.common.cos_client import upload_file, delete_file, get_presigned_url
 from app.common.exceptions import NotFoundException, ForbiddenException
 from app.knowledge_base.models import KnowledgeBase, Document, DocumentChunk
 from app.knowledge_base import repository as kb_repo

@@ -1,6 +1,5 @@
 from datetime import datetime
 
-from fastapi import Depends
 from langchain_core.tools import tool
 
 from app.common.database import async_session_factory
