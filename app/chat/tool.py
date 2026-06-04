@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from fastapi import Depends
 from langchain_core.tools import tool
 
@@ -26,3 +28,9 @@ async def knowledge_search(query: str, knowledge_base_ids: list[str]) -> str:
             return "\n\n---\n\n".join(results)
         except Exception as e:
             return f"知识库检索出错: {str(e)}"
+
+
+@tool
+def get_cur_date() -> str:
+    """当用户询问日期时调用该工具，比如：今天多少号，今天的日期是多少等。"""
+    return datetime.now().strftime("%Y-%m-%d")

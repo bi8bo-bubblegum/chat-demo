@@ -20,3 +20,13 @@ class TitleUpdateEvent(BaseModel):
     type: str = 'title_update'
     conversation_id: str
     title: str
+
+class ToolStartEvent(BaseModel):
+    type: str = 'tool_start'
+    name: str
+    args: dict
+
+class ToolEndEvent(BaseModel):
+    type: str = 'tool_end'
+    name: str
+    output: str

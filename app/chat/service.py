@@ -6,7 +6,7 @@ from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.chat.graph import build_graph
-from app.chat.schemas import TokenEvent, DoneEvent, ErrorEvent, TitleUpdateEvent
+from app.chat.schemas import TokenEvent, DoneEvent, ErrorEvent, TitleUpdateEvent, ToolStartEvent, ToolEndEvent
 from app.conversation import service as conversation_service
 from app.message import service as message_service
 from app.message.repository import count_message_by_conversation
@@ -48,6 +48,18 @@ async def chat_stream(
                     full_response += chunk.content
                     token_event = TokenEvent(content=chunk.content)
                     yield f'data: {token_event.model_dump_json()}\n\n'
+            elif kind == 'on_tool_start':
+                tool_start_event = ToolStartEvent(
+                    name=event['name'],
+                    args=event['data'].get('input', {}),
+                )
+                yield f'data: {tool_start_event.model_dump_json()}\n\n'
+            elif kind == 'on_tool_end':
+                tool_end_event = ToolEndEvent(
+                    name=event['name'],
+                    output=str(event['data'].get('output', '')),
+                )
+                yield f'data: {tool_end_event.model_dump_json()}\n\n'
 
         await message_service.save_message(db, conversation_id, 'assistant', full_response)
         await db.commit()

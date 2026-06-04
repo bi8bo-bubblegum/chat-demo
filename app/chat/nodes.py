@@ -1,32 +1,25 @@
-from langchain_core.messages import AIMessage, SystemMessage
+from langchain_core.messages import SystemMessage
 from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import ToolNode
 
 from app.chat.state import ChatState
-from app.chat.tool import knowledge_search
+from app.chat.tool import knowledge_search, get_cur_date
 from app.common.config import settings
 
 llm = ChatOpenAI(
-    model = settings.DEEPSEEK_MODEL,
-    api_key=settings.DEEPSEEK_API_KEY,
-    base_url=settings.DEEPSEEK_BASE_URL
-)
-
-llm_with_tools = ChatOpenAI(
     model=settings.DEEPSEEK_MODEL,
     api_key=settings.DEEPSEEK_API_KEY,
     base_url=settings.DEEPSEEK_BASE_URL,
     streaming=True,
     extra_body={"enable_thinking": False},
-).bind_tools([knowledge_search])
+).bind_tools([knowledge_search, get_cur_date])
 
 
 async def chat_node(state: ChatState):
-    """主聊天节点：判断是否需要调用工具"""
+    """主聊天节点：统一使用带 tools 的 LLM，AI 自主决定是否调用工具"""
     kb_ids = state.get('knowledge_base_ids', [])
 
     if kb_ids:
-        # 有关联知识库时，使用带 tools 的 LLM
         system_msg = SystemMessage(
             content=(
                 "你是一个智能助手。当用户的问题可能与知识库文档相关时，"
@@ -38,19 +31,14 @@ async def chat_node(state: ChatState):
             )
         )
         messages = [system_msg] + state['messages']
-        response = await llm_with_tools.ainvoke(messages)
     else:
-        # 无关联知识库时，直接对话
-        full_content = ''
-        async for chunk in llm.astream(state['messages']):
-            if chunk.content:
-                full_content += chunk.content
-        return {'messages': [AIMessage(content=full_content)]}
+        messages = state['messages']
 
+    response = await llm.ainvoke(messages)
     return {'messages': [response]}
 
 async def tool_node(state: ChatState):
     """工具执行节点：处理 LLM 返回的 tool_calls"""
-    tools = [knowledge_search]
+    tools = [knowledge_search, get_cur_date]
     tool_node_instance = ToolNode(tools)
     return await tool_node_instance.ainvoke(state)
