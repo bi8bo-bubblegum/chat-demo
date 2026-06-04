@@ -24,7 +24,7 @@ class KnowledgeBaseResponse(BaseModel):
 class DocumentResponse(BaseModel):
     id: UUID
     filename: str
-    file_size: str
+    file_size: int
     chunk_count: int
     status: str
     created_at: datetime | None

@@ -1,10 +1,11 @@
 from fastapi import APIRouter, Depends, File, UploadFile
+from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.models import User
 from app.common.deps import get_db, get_current_user
 from app.common.response import success
-from app.knowledge_base.schemas import KnowledgeBaseCreate
+from app.knowledge_base.schemas import KnowledgeBaseCreate, DocumentResponse, KnowledgeBaseResponse
 from app.knowledge_base import service as kb_service
 
 router = APIRouter(prefix='/api/knowledge-bases', tags=['知识库'])
@@ -15,7 +16,7 @@ async def create_knowledge_base(
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(get_current_user)
 ):
-    kb = await kb_service.create_knowledge_base(db, current_user.id, data)
+    kb = await kb_service.create_knowledge_base(db, str(current_user.id), data)
     return success(data=kb.model_dump(), message="创建成功", code=201)
 
 @router.get("")
@@ -51,7 +52,7 @@ async def upload_document(
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(get_current_user)
 ):
-    content = file.read()
+    content = await file.read()
     doc = await kb_service.upload_document(db, str(current_user.id), kb_id, file.filename, content)
     return success(data={
         "id": str(doc.id),
@@ -65,8 +66,12 @@ async def list_documents(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    docs = await kb_service.list_documents(db,current_user.id, kb_id)
-    return success(data=[doc.model_dump() for doc in docs])
+    docs = await kb_service.list_documents(db,str(current_user.id), kb_id)
+    result = []
+    for doc in docs:
+        resp = DocumentResponse.model_validate(doc)
+        result.append(resp.model_dump())
+    return success(data=result)
 
 @router.delete("/{kb_id}/documents/{doc_id}")
 async def delete_document(
@@ -77,3 +82,26 @@ async def delete_document(
 ):
     await kb_service.delete_document(db, str(current_user.id), kb_id, doc_id)
     return success(message='删除成功')
+
+
+@router.get("/{kb_id}/documents/{doc_id}/download")
+async def download_document(
+    kb_id: str,
+    doc_id: str,
+    token: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """通过 query param 中的 token 认证，返回 PDF 文件供浏览器预览"""
+    from app.common.security import decode_access_token
+    from app.common.exceptions import UnauthorizedException
+    from app.auth.repository import get_user_by_username
+    try:
+        payload = decode_access_token(token)
+    except ValueError:
+        raise UnauthorizedException(message="无效的认证信息")
+    username = payload.get("sub")
+    user = await get_user_by_username(db, username)
+    if not user:
+        raise UnauthorizedException(message="用户不存在")
+    file_path, filename = await kb_service.get_document_file(db, str(user.id), kb_id, doc_id)
+    return FileResponse(path=file_path, filename=filename, media_type="application/pdf")

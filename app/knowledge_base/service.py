@@ -1,5 +1,6 @@
 import os.path
-from uuid import uuid4
+import logging
+from uuid import UUID, uuid4
 
 from PyPDF2 import PdfReader
 from langchain_openai import OpenAIEmbeddings
@@ -10,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.common.config import settings
 from app.common.exceptions import NotFoundException, ForbiddenException
 from app.knowledge_base.models import KnowledgeBase, Document, DocumentChunk
-from app.knowledge_base import repostitory as kb_repo
+from app.knowledge_base import repository as kb_repo
 from app.knowledge_base.schemas import KnowledgeBaseCreate, KnowledgeBaseResponse
 
 embeddings = OpenAIEmbeddings(
@@ -20,7 +21,7 @@ embeddings = OpenAIEmbeddings(
 )
 
 async def create_knowledge_base(db: AsyncSession, user_id: str, data: KnowledgeBaseCreate) -> KnowledgeBaseResponse:
-    kb = KnowledgeBase(name=data.name, description=data.description, user_id=user_id)
+    kb = KnowledgeBase(name=data.name, description=data.description, user_id=UUID(user_id))
     kb = await kb_repo.create_knowledge_base(db, kb)
     return KnowledgeBaseResponse.model_validate(kb)
 
@@ -29,7 +30,7 @@ async def list_knowledge_bases(db: AsyncSession, user_id: str) -> list[Knowledge
     result = []
     for kb in kb_list:
         resp = KnowledgeBaseResponse.model_validate(kb)
-        resp.document_count = await kb_repo.count_documents_by_kb(db, kb.id)
+        resp.document_count = await kb_repo.count_documents_by_kb(db, str(kb.id))
         result.append(resp)
     return result
 
@@ -40,7 +41,7 @@ async def get_knowledge_base(db: AsyncSession, user_id: str, kb_id: str) -> Know
     if str(kb.user_id) != user_id:
         raise ForbiddenException(message="无权访问该知识库")
     resp = KnowledgeBaseResponse.model_validate(kb)
-    resp.document_count = await kb_repo.count_documents_by_kb(db, kb.id)
+    resp.document_count = await kb_repo.count_documents_by_kb(db, str(kb.id))
     return resp
 
 async def delete_knowledge_base(db: AsyncSession, user_id: str, kb_id: str):
@@ -61,10 +62,10 @@ async def upload_document(db: AsyncSession, user_id: str, kb_id: str, filename: 
         raise NotFoundException(message=f"知识库 {kb_id} 不存在")
     if str(kb.user_id) != user_id:
         raise ForbiddenException(message="无权访问该知识库")
-    user_dir = os.path.join(settings.DOCUMENT_DIR, user_id)
+    user_dir = os.path.join(settings.UPLOAD_DIR, user_id)
     os.makedirs(user_dir, exist_ok=True)
     doc_id = uuid4()
-    file_path = os.path.join(user_id, f'{doc_id}.pdf')
+    file_path = os.path.join(user_dir, f'{doc_id}.pdf')
     with open(file_path, 'wb') as f:
         f.write(file_content)
 
@@ -74,7 +75,7 @@ async def upload_document(db: AsyncSession, user_id: str, kb_id: str, filename: 
         file_path=file_path,
         file_size=len(file_content),
         status='pending',
-        knowledge_base_id=kb_id
+        knowledge_base_id=UUID(kb_id)
     )
     doc = await kb_repo.create_document(db, doc)
     doc_id_str = str(doc.id)
@@ -114,8 +115,8 @@ async def upload_document(db: AsyncSession, user_id: str, kb_id: str, filename: 
         # 更新状态
         await kb_repo.update_document_status(db, doc_id_str, 'completed', len(chunks))
     except Exception as e:
+        logging.error(f"Document processing error: {e}", exc_info=True)
         await kb_repo.update_document_status(db, doc_id_str, 'failed')
-        raise e
     return doc
 
 
@@ -142,15 +143,28 @@ async def delete_document(db: AsyncSession, user_id: str, kb_id: str, doc_id: st
         os.remove(doc.file_path)
     await kb_repo.delete_document(db, doc)
 
-async def list_documents(db: AsyncSession,user_id: str, kb_id: str):
-    docs = await kb_repo.list_documents_by_kb(db, kb_id)
+
+async def get_document_file(db: AsyncSession, user_id: str, kb_id: str, doc_id: str) -> tuple[str, str]:
+    """获取文档文件路径和文件名，用于下载/预览"""
     kb = await kb_repo.get_knowledge_base_by_id(db, kb_id)
     if not kb:
         raise NotFoundException(message='知识库不存在')
-    if not docs:
-        raise NotFoundException(message='没有文档')
     if str(kb.user_id) != user_id:
         raise ForbiddenException(message='无权访问')
+    doc = await kb_repo.get_document_by_id(db, doc_id)
+    if not doc:
+        raise NotFoundException(message='文档不存在')
+    if not os.path.exists(doc.file_path):
+        raise NotFoundException(message='文件不存在')
+    return doc.file_path, doc.filename
+
+async def list_documents(db: AsyncSession, user_id: str, kb_id: str):
+    kb = await kb_repo.get_knowledge_base_by_id(db, kb_id)
+    if not kb:
+        raise NotFoundException(message='知识库不存在')
+    if str(kb.user_id) != user_id:
+        raise ForbiddenException(message='无权访问')
+    docs = await kb_repo.list_documents_by_kb(db, kb_id)
     return docs
 
 

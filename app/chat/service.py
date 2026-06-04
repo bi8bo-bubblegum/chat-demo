@@ -26,15 +26,19 @@ async def chat_stream(
         await message_service.save_message(db, conversation_id, 'user', message)
         await db.commit()
 
-        # 判断是否首条消息（此时只有刚保存的 user 消息，assistant 还未生成）
         is_first_message = await count_message_by_conversation(db, conversation_id) <= 1
+
+        # 获取对话关联的知识库ID列表
+        kb_ids = await conversation_service.get_conversation_kb_ids(db, conversation_id)
 
         graph = build_graph(checkpointer)
         config = {'configurable': {'thread_id': conversation_id}}
         input_state = {
             'messages': [HumanMessage(content=message)],
-            'conversation_id': conversation_id
+            'conversation_id': conversation_id,
+            'knowledge_base_ids': kb_ids,
         }
+
         full_response = ''
         async for event in graph.astream_events(input_state, config, version='v2'):
             kind = event['event']
@@ -42,15 +46,12 @@ async def chat_stream(
                 chunk = event['data']['chunk']
                 if hasattr(chunk, 'content') and chunk.content:
                     full_response += chunk.content
-                    token_event = TokenEvent(
-                        content=chunk.content
-                    )
+                    token_event = TokenEvent(content=chunk.content)
                     yield f'data: {token_event.model_dump_json()}\n\n'
 
         await message_service.save_message(db, conversation_id, 'assistant', full_response)
         await db.commit()
 
-        # 首条消息时异步生成标题
         if is_first_message:
             title = await conversation_service.generate_and_update_title(db, conversation_id, message)
             if title:

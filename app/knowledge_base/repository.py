@@ -13,7 +13,7 @@ async def create_knowledge_base(db: AsyncSession, knowledge_base: KnowledgeBase)
 
 async def list_knowledge_bases_by_user(db: AsyncSession, user_id: str) -> list[KnowledgeBase]:
     sql = (select(KnowledgeBase)
-           .where(KnowledgeBase.user_id == user_id)
+           .where(KnowledgeBase.user_id == UUID(user_id))
            .order_by(KnowledgeBase.created_at.desc()))
     result = await db.execute(sql)
     return list(result.scalars().all())
@@ -47,7 +47,7 @@ async def get_document_by_id(db: AsyncSession, doc_id: str) -> Document | None:
 
 async def list_documents_by_kb(db: AsyncSession, kb_id: str) -> list[Document]:
     sql = (select(Document)
-           .where(Document.knowledge_base_id == kb_id)
+           .where(Document.knowledge_base_id == UUID(kb_id))
            .order_by(Document.created_at.desc()))
     result = await db.execute(sql)
     return list(result.scalars().all())

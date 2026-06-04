@@ -8,6 +8,7 @@ from app.auth.router import router as auth_router
 from app.conversation.router import router as conversation_router
 from app.message.router import router as message_router
 from app.chat.router import router as chat_router
+from app.knowledge_base.router import router as knowledge_base_router
 from app.common.config import settings
 from app.common.exceptions import register_exception_handlers
 
@@ -41,6 +42,7 @@ app.include_router(router=auth_router)
 app.include_router(router=conversation_router)
 app.include_router(router=message_router)
 app.include_router(router=chat_router)
+app.include_router(router=knowledge_base_router)
 
 
 @app.get("/health")
