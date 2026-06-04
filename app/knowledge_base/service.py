@@ -1,14 +1,14 @@
-import os.path
+import io
 import logging
 from uuid import UUID, uuid4
 
 from PyPDF2 import PdfReader
 from langchain_openai import OpenAIEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.config import settings
+from app.common.cos_client import upload_file, download_file, delete_file, get_presigned_url
 from app.common.exceptions import NotFoundException, ForbiddenException
 from app.knowledge_base.models import KnowledgeBase, Document, DocumentChunk
 from app.knowledge_base import repository as kb_repo
@@ -52,8 +52,7 @@ async def delete_knowledge_base(db: AsyncSession, user_id: str, kb_id: str):
         raise ForbiddenException(message="无权删除该知识库")
     docs = await kb_repo.list_documents_by_kb(db, kb_id)
     for doc in docs:
-        if os.path.exists(doc.file_path):
-            os.remove(doc.file_path)
+        delete_file(doc.file_path)
     await kb_repo.delete_knowledge_base(db, kb)
 
 async def upload_document(db: AsyncSession, user_id: str, kb_id: str, filename: str, file_content: bytes) -> Document:
@@ -62,17 +61,16 @@ async def upload_document(db: AsyncSession, user_id: str, kb_id: str, filename: 
         raise NotFoundException(message=f"知识库 {kb_id} 不存在")
     if str(kb.user_id) != user_id:
         raise ForbiddenException(message="无权访问该知识库")
-    user_dir = os.path.join(settings.UPLOAD_DIR, user_id)
-    os.makedirs(user_dir, exist_ok=True)
     doc_id = uuid4()
-    file_path = os.path.join(user_dir, f'{doc_id}.pdf')
-    with open(file_path, 'wb') as f:
-        f.write(file_content)
+    object_key = f'{user_id}/{doc_id}.pdf'
+
+    # 上传到腾讯云 COS
+    upload_file(object_key, file_content)
 
     doc = Document(
         id = doc_id,
         filename=filename,
-        file_path=file_path,
+        file_path=object_key,
         file_size=len(file_content),
         status='pending',
         knowledge_base_id=UUID(kb_id)
@@ -83,7 +81,7 @@ async def upload_document(db: AsyncSession, user_id: str, kb_id: str, filename: 
         await kb_repo.update_document_status(db, doc_id_str, 'processing')
 
         # 解析PDF
-        text = _extract_text_from_pdf(file_path)
+        text = _extract_text_from_pdf_bytes(file_content)
         if not text.strip():
             await kb_repo.update_document_status(db, doc_id_str, 'failed')
             return doc
@@ -120,9 +118,9 @@ async def upload_document(db: AsyncSession, user_id: str, kb_id: str, filename: 
     return doc
 
 
-def _extract_text_from_pdf(file_path: str) -> str:
-    """使用 PyPDF2 提取 PDF 文本"""
-    reader = PdfReader(file_path)
+def _extract_text_from_pdf_bytes(file_bytes: bytes) -> str:
+    """从 bytes 中提取 PDF 文本"""
+    reader = PdfReader(io.BytesIO(file_bytes))
     text_parts = []
     for page in reader.pages:
         text = page.extract_text()
@@ -139,13 +137,12 @@ async def delete_document(db: AsyncSession, user_id: str, kb_id: str, doc_id: st
     doc = await kb_repo.get_document_by_id(db, doc_id)
     if not doc:
         raise NotFoundException(message='文档不存在')
-    if os.path.exists(doc.file_path):
-        os.remove(doc.file_path)
+    delete_file(doc.file_path)
     await kb_repo.delete_document(db, doc)
 
 
-async def get_document_file(db: AsyncSession, user_id: str, kb_id: str, doc_id: str) -> tuple[str, str]:
-    """获取文档文件路径和文件名，用于下载/预览"""
+async def get_document_presigned_url(db: AsyncSession, user_id: str, kb_id: str, doc_id: str, expires: int = 3600) -> tuple[str, str]:
+    """获取文档预签名 URL 和文件名，用于下载/预览"""
     kb = await kb_repo.get_knowledge_base_by_id(db, kb_id)
     if not kb:
         raise NotFoundException(message='知识库不存在')
@@ -154,9 +151,8 @@ async def get_document_file(db: AsyncSession, user_id: str, kb_id: str, doc_id: 
     doc = await kb_repo.get_document_by_id(db, doc_id)
     if not doc:
         raise NotFoundException(message='文档不存在')
-    if not os.path.exists(doc.file_path):
-        raise NotFoundException(message='文件不存在')
-    return doc.file_path, doc.filename
+    url = get_presigned_url(doc.file_path, expires)
+    return url, doc.filename
 
 async def list_documents(db: AsyncSession, user_id: str, kb_id: str):
     kb = await kb_repo.get_knowledge_base_by_id(db, kb_id)

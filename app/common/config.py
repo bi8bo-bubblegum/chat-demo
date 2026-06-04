@@ -19,6 +19,11 @@ class Settings(BaseSettings):
     CHUNK_SIZE: int = 500
     CHUNK_OVERLAP: int = 50
     RETRIEVAL_TOP_K: int = 5
+    COS_SECRET_ID: str
+    COS_SECRET_KEY: str
+    COS_REGION: str
+    COS_BUCKET: str
+    COS_SCHEMA: str
 
     model_config = {
         'env_file': BASE_DIR / '.env',

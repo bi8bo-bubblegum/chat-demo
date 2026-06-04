@@ -1,11 +1,14 @@
 from fastapi import APIRouter, Depends, File, UploadFile
-from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi.responses import RedirectResponse
 
 from app.auth.models import User
+from app.auth.repository import get_user_by_username
 from app.common.deps import get_db, get_current_user
+from app.common.exceptions import UnauthorizedException
 from app.common.response import success
-from app.knowledge_base.schemas import KnowledgeBaseCreate, DocumentResponse, KnowledgeBaseResponse
+from app.common.security import decode_access_token
+from app.knowledge_base.schemas import KnowledgeBaseCreate, DocumentResponse
 from app.knowledge_base import service as kb_service
 
 router = APIRouter(prefix='/api/knowledge-bases', tags=['知识库'])
@@ -91,10 +94,6 @@ async def download_document(
     token: str,
     db: AsyncSession = Depends(get_db),
 ):
-    """通过 query param 中的 token 认证，返回 PDF 文件供浏览器预览"""
-    from app.common.security import decode_access_token
-    from app.common.exceptions import UnauthorizedException
-    from app.auth.repository import get_user_by_username
     try:
         payload = decode_access_token(token)
     except ValueError:
@@ -103,5 +102,5 @@ async def download_document(
     user = await get_user_by_username(db, username)
     if not user:
         raise UnauthorizedException(message="用户不存在")
-    file_path, filename = await kb_service.get_document_file(db, str(user.id), kb_id, doc_id)
-    return FileResponse(path=file_path, filename=filename, media_type="application/pdf")
+    url, filename = await kb_service.get_document_presigned_url(db, str(user.id), kb_id, doc_id)
+    return RedirectResponse(url=url)
